@@ -1,3 +1,10 @@
+> **Ainkrad fork of [str4d/rage](https://github.com/str4d/rage) at `age-0.11.5`.**
+>
+> - **What differs:** i18n removed; message lookup is a plain en-US table. No crypto or file-format changes.
+> - **Why:** reproducible builds (no localisation machinery or its dependency tree).
+> - **Updating from upstream:** rebase `ainkrad-no-i18n` onto the new upstream tag, re-review `git diff <tag>..HEAD`, run the tests, then re-pin the `rev` in AinkradCore `Cargo.toml` and `deny.toml`.
+> - **Licences:** unchanged (MIT OR Apache-2.0, as upstream).
+
 <p align="center"><img alt="The age logo, an wireframe of St. Peters dome in Rome, with the text: age, file encryption" width="600" src="https://user-images.githubusercontent.com/1225294/132245842-fda4da6a-1cea-4738-a3da-2dc860861c98.png"></p>
 
 # rage: Rust implementation of age
