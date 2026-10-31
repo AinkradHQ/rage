@@ -1,40 +1,103 @@
-use i18n_embed::{
-    fluent::{fluent_language_loader, FluentLanguageLoader},
-    unic_langid::LanguageIdentifier,
-    I18nEmbedError, LanguageLoader, Localizer,
-};
-use lazy_static::lazy_static;
-use rust_embed::RustEmbed;
+//! Plain-English message lookup.
+//!
+//! The upstream fluent/proc-macro localisation machinery is replaced by a tiny resolver over the
+//! embedded en-US message file. It understands only what that file uses: `{$arg}`, `{-term}`,
+//! `{message-id}` and `{"literal"}` placeables, and multi-line values.
 
-#[derive(RustEmbed)]
-#[folder = "i18n"]
-struct Localizations;
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
-lazy_static! {
-    pub(crate) static ref LANGUAGE_LOADER: FluentLanguageLoader = {
-        let language_loader = fluent_language_loader!();
-        // Ensure that the fallback language is always loaded, even if the library user
-        // doesn't call `localizer().select(languages)`.
-        let fallback: LanguageIdentifier = "en-US".parse().unwrap();
-        language_loader.load_languages(&Localizations, &[fallback]).unwrap();
-        language_loader
-    };
+const MESSAGES: &str = include_str!("../i18n/en-US/age.ftl");
+
+fn table() -> &'static HashMap<&'static str, String> {
+    static TABLE: OnceLock<HashMap<&'static str, String>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut map = HashMap::new();
+        let mut lines = MESSAGES.lines().peekable();
+        while let Some(line) = lines.next() {
+            let Some((id, first)) = line.split_once(" =") else {
+                continue;
+            };
+            if line.starts_with(['#', ' ']) || id.contains(' ') {
+                continue;
+            }
+            let mut rest = vec![];
+            while let Some(next) = lines.peek() {
+                if next.starts_with(' ') || next.is_empty() {
+                    rest.push(*next);
+                    lines.next();
+                } else {
+                    break;
+                }
+            }
+            while rest.last().is_some_and(|l| l.trim().is_empty()) {
+                rest.pop();
+            }
+            let indent = rest
+                .iter()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| l.len() - l.trim_start().len())
+                .min()
+                .unwrap_or(0);
+            let mut parts = vec![];
+            if !first.trim().is_empty() {
+                parts.push(first.trim().to_string());
+            }
+            parts.extend(rest.iter().map(|l| l.get(indent..).unwrap_or("").to_string()));
+            map.insert(id, parts.join("\n"));
+        }
+        map
+    })
 }
 
-/// Loads a localized age string.
+fn render(template: &str, args: &[(&str, String)], out: &mut String) {
+    let mut rest = template;
+    while let Some(start) = rest.find('{') {
+        out.push_str(&rest[..start]);
+        let end = rest[start..].find('}').map_or(rest.len(), |e| start + e);
+        let key = rest[start + 1..end].trim();
+        if let Some(name) = key.strip_prefix('$') {
+            match args.iter().find(|(k, _)| *k == name) {
+                Some((_, v)) => out.push_str(v),
+                None => out.push_str(key),
+            }
+        } else if let Some(lit) = key.strip_prefix('"').and_then(|k| k.strip_suffix('"')) {
+            out.push_str(lit);
+        } else if let Some(msg) = table().get(key) {
+            render(msg, args, out);
+        } else {
+            out.push_str(key);
+        }
+        rest = rest.get(end + 1..).unwrap_or("");
+    }
+    out.push_str(rest);
+}
+
+/// Looks up an en-US message and substitutes its arguments.
+#[doc(hidden)]
+pub fn lookup(id: &str, args: &[(&str, String)]) -> String {
+    let mut out = String::new();
+    match table().get(id) {
+        Some(msg) => render(msg, args, &mut out),
+        None => out.push_str(id),
+    }
+    out
+}
+
+/// Loads a message.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! fl {
     ($message_id:literal) => {{
-        i18n_embed_fl::fl!($crate::i18n::LANGUAGE_LOADER, $message_id)
+        $crate::i18n::lookup($message_id, &[])
     }};
 
-    ($message_id:literal, $($args:expr),* $(,)?) => {{
-        i18n_embed_fl::fl!($crate::i18n::LANGUAGE_LOADER, $message_id, $($args), *)
+    ($message_id:literal, $($key:ident = $value:expr),* $(,)?) => {{
+        $crate::i18n::lookup($message_id, &[$((stringify!($key), ($value).to_string())),*])
     }};
 }
 
-/// age-localized version of the write! macro.
+/// Version of the write! macro that takes a message id.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! wfl {
@@ -42,12 +105,12 @@ macro_rules! wfl {
         write!($f, "{}", $crate::fl!($message_id))
     };
 
-    ($f:ident, $message_id:literal, $($args:expr),* $(,)?) => {
-        write!($f, "{}", $crate::fl!($message_id, $($args), *))
+    ($f:ident, $message_id:literal, $($args:tt)*) => {
+        write!($f, "{}", $crate::fl!($message_id, $($args)*))
     };
 }
 
-/// age-localized version of the writeln! macro.
+/// Version of the writeln! macro that takes a message id.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! wlnfl {
@@ -55,49 +118,29 @@ macro_rules! wlnfl {
         writeln!($f, "{}", $crate::fl!($message_id))
     };
 
-    ($f:ident, $message_id:literal, $($args:expr),* $(,)?) => {
-        writeln!($f, "{}", $crate::fl!($message_id, $($args), *))
+    ($f:ident, $message_id:literal, $($args:tt)*) => {
+        writeln!($f, "{}", $crate::fl!($message_id, $($args)*))
     };
 }
 
-/// Returns the [`Localizer`] to be used for localizing this library.
-///
-/// # Examples
-///
-/// ```
-/// // Fetch the set of languages that the user's desktop environment requests.
-/// let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();
-///
-/// // Localize the age crate based on the requested languages.
-/// //
-/// // If none of the requested languages are available, or if this function
-/// // is not called, age defaults to en-US.
-/// age::localizer().select(&requested_languages).unwrap();
-/// ```
-pub fn localizer() -> Box<dyn Localizer> {
-    Box::from(AgeLocalizer)
-}
+#[cfg(test)]
+mod tests {
+    use super::lookup;
 
-struct AgeLocalizer;
-
-impl Localizer for AgeLocalizer {
-    fn language_loader(&self) -> &'_ dyn LanguageLoader {
-        &*LANGUAGE_LOADER
+    #[test]
+    fn resolves_terms_args_and_multiline() {
+        assert_eq!(lookup("err-decryption-failed", &[]), "Decryption failed");
+        let m = lookup("err-read-rsa-modulus-too-large", &[("max_size", "4096".into())]);
+        assert!(m.starts_with("RSA Modulus Too Large\n---"));
+        assert!(m.contains("OpenSSH") && m.contains("rage") && m.contains("4096 bits"));
+        assert!(!m.contains('{'));
     }
 
-    fn i18n_assets(&self) -> &'_ dyn i18n_embed::I18nAssets {
-        &Localizations
-    }
-
-    fn select(
-        &self,
-        requested_languages: &[LanguageIdentifier],
-    ) -> Result<Vec<LanguageIdentifier>, I18nEmbedError> {
-        let supported_languages =
-            i18n_embed::select(&*LANGUAGE_LOADER, &Localizations, requested_languages)?;
-        // Unfortunately the common Windows terminals don't support Unicode Directionality
-        // Isolation Marks, so we disable them for now.
-        LANGUAGE_LOADER.set_use_isolating(false);
-        Ok(supported_languages)
+    #[test]
+    fn every_message_resolves_without_placeholders_left_over_from_terms() {
+        for id in super::table().keys().filter(|k| !k.starts_with('-')) {
+            let out = lookup(id, &[]);
+            assert!(!out.contains("{-") && !out.contains("{\""), "{id}: {out}");
+        }
     }
 }

@@ -22,7 +22,6 @@ age-core.workspace = true
 base64.workspace = true
 chacha20poly1305.workspace = true
 hmac.workspace = true
-i18n-embed.workspace = true
 rand.workspace = true
 
 # OpenSSH-specific dependencies:
@@ -43,10 +42,7 @@ pinentry = { workspace = true, optional = true }
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 bech32.workspace = true
 cookie-factory.workspace = true
-i18n-embed-fl.workspace = true
-lazy_static.workspace = true
 nom.workspace = true
-rust-embed.workspace = true
 scrypt.workspace = true
 sha2.workspace = true
 subtle.workspace = true
@@ -86,7 +82,6 @@ criterion = "0.5"
 flate2.workspace = true
 futures-test = "0.3"
 hex = "0.4"
-i18n-embed = { workspace = true, features = ["desktop-requester"] }
 proptest = "1"
 test-case = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

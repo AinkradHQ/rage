@@ -231,8 +231,8 @@ pub use primitives::armor;
 #[cfg_attr(docsrs, doc(cfg(feature = "cli-common")))]
 pub mod cli_common;
 
-mod i18n;
-pub use i18n::localizer;
+#[doc(hidden)]
+pub mod i18n;
 
 //
 // Simple interface
